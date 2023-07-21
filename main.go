@@ -7,12 +7,9 @@ import (
 	"sync"
 	"time"
 
-	//"net/http"
 	"database/sql"
 	"os"
 
-	//"github.com/gorilla/mux"
-	//"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 )
 
@@ -53,14 +50,12 @@ func (d *db1) make_connection() {
 	UserTypeChan := make(chan UserType)
 	UserBankChan := make(chan UserBank)
 	UserDocsChan := make(chan UserDocs)
+	LoanUserChan := make(chan LoanUser)
 	processedRecordsChan := make(chan ProcessedRecords)
 	done := make(chan struct{})
-	//done1 := make(chan struct{})
+	done1 := make(chan struct{})
 	wg.Add(1)
 	go fetchCustomUserData(db, CustomUserChan, &wg)
-
-	wg.Add(1)
-	go fetchDeviceInfoData(db, DeviceInfoChan, &wg)
 
 	wg.Add(1)
 	go fetchUserTypeData(db, UserTypeChan, &wg)
@@ -71,15 +66,25 @@ func (d *db1) make_connection() {
 	wg.Add(1)
 	go fetchUserDocsData(db, UserDocsChan, &wg)
 
+	wg.Add(1)
+	go fetchLoanUserData(db, LoanUserChan, &wg)
+
+	wg.Add(1)
+	go fetchDeviceInfoData(db, DeviceInfoChan, &wg)
+
 	// Start a goroutine to process the fetched loan data entries and generate the report
 	wg.Add(1)
-	go ProcessRecords(CustomUserChan, DeviceInfoChan, UserTypeChan, UserBankChan, UserDocsChan, processedRecordsChan, &wg)
+	go ProcessRecords(CustomUserChan, DeviceInfoChan, UserTypeChan, UserBankChan, UserDocsChan, LoanUserChan, processedRecordsChan, &wg)
 
-	//wg.Add(1)
-	//go writeDataToCSV("loan_data.csv", "borrower_data.csv", "interest_rate.csv", CustomUserChan, DeviceInfoChan, UserTypeChan, UserBankChan, UserDocsChan, done1, &wg)
+	wg.Add(1)
+	go writeDataToCSV(processedRecordsChan, done, &wg)
 	// Wait for all goroutines to finish
 	wg.Wait()
 
+	close(done1)
+}
+
+func writeDataToCSV(processedRecordsChan <-chan ProcessedRecords, done chan<- struct{}, wg *sync.WaitGroup) {
 	//csv file
 	// Opening the CSV file for writing
 	file, err := os.Create("compiled_data.csv")
@@ -91,52 +96,70 @@ func (d *db1) make_connection() {
 	// Creating a CSV writer
 	writer := csv.NewWriter(file)
 	defer writer.Flush()
-
 	// Write the processed loan data to the CSV file
-	for processedData := range processedRecordsChan {
+	//for processedData := range processedRecordsChan {
+	//	record := []string{
+	//		fmt.Sprintf("%d", processedData.max_credit_limit),
+	//		processedData.first_name,
+	//		processedData.last_name,
+	//		*processedData.address,
+	//	}
+
+	for {
+		d, ok := <-processedRecordsChan // Receive data from the channel
+		if !ok {
+			// Channel is closed, no more data to receive
+			break
+		}
+		// Process the received data
 		record := []string{
-			fmt.Sprintf("%d", processedData.max_credit_limit),
-			processedData.first_name,
-			processedData.last_name,
-			processedData.address,
+			fmt.Sprintf("%d", d.max_credit_limit),
+			d.first_name,
+			d.last_name,
+			*d.address,
 		}
 
-		writer.Write(record)
+		err = writer.Write(record)
+		if err != nil {
+			log.Fatal(err)
+		}
 	}
-
 	close(done)
 }
 
 type ProcessedRecords struct {
-	address                   string
-	auto                      bool
-	blocked                   bool
-	blocked_date_time         time.Time
-	blocked_reason            string
-	can_apply_date_time       time.Time
+	created_at                time.Time
+	address                   *string
+	auto                      *bool
+	blocked                   *bool
+	blocked_date_time         *time.Time
+	blocked_reason            *string
+	can_apply_date_time       *time.Time
 	can_apply_for_loan        bool
-	date_of_birth             time.Time
-	fathers_name              string
+	date_of_birth             *time.Time
+	fathers_name              *string
 	first_name                string
-	gender                    string
+	gender                    *string
 	interested                bool
 	last_name                 string
-	not_interested_reason     string
+	not_interested_reason     *string
 	phone_number              string
-	phone_number_verified     bool
+	phone_number_verified     *bool
 	max_credit_limit          int
 	device_info               string
+	last_login                *time.Time
+	email                     string
 	name                      string
-	account_number            string
-	bank_name                 string
+	account_number            *string
+	bank_name                 *string
 	bene_name_from_bank       *string
-	ifsc_code                 string
+	ifsc_code                 *string
 	verified                  string
 	address_proof_verified    string
 	adhar_card_verified       string
 	bank_statement_password   *string
 	bank_statement_verified   string
-	cibil_score               int
+	cibil_score               *int
 	cibil_score_verified      string
 	digital_ekyc              *bool
 	office_email_id           *string
@@ -160,25 +183,32 @@ type CustomUser struct {
 	first_name            string
 	last_name             string
 	can_apply_for_loan    bool
-	blocked               bool
-	address               string
-	date_of_birth         time.Time
-	gender                string
+	blocked               *bool
+	address               *string
+	date_of_birth         *time.Time
+	gender                *string
 	interested            bool
-	fathers_name          string
-	blocked_reason        string
-	not_interested_reason string
+	fathers_name          *string
+	blocked_reason        *string
+	not_interested_reason *string
 	max_credit_limit      int
-	blocked_date_time     time.Time
-	can_apply_date_time   time.Time
-	auto                  bool
-	phone_number_verified bool
+	blocked_date_time     *time.Time
+	can_apply_date_time   *time.Time
+	auto                  *bool
+	phone_number_verified *bool
 }
 
 type DeviceInfo struct {
-	id          int
+	//id          int
 	device_info string
 	user_id     int
+}
+
+type LoanUser struct {
+	id         int
+	last_login *time.Time
+	email      string
+	created_at time.Time
 }
 
 type UserType struct {
@@ -188,9 +218,9 @@ type UserType struct {
 
 type UserBank struct {
 	user_id             int
-	bank_name           string
-	account_number      string
-	ifsc_code           string
+	bank_name           *string
+	account_number      *string
+	ifsc_code           *string
 	verified            string
 	bene_name_from_bank *string
 }
@@ -214,10 +244,12 @@ type UserDocs struct {
 	social_score_verified     string
 	bank_statement_verified   string
 	bank_statement_password   *string
-	cibil_score               int
+	cibil_score               *int
 	cibil_score_verified      string
 	digital_ekyc              *bool
 }
+
+// ORDER BY user_id LIMIT 5000
 
 // Fetch custom user data from the database and send it to the CustomUserChan channel
 func fetchCustomUserData(db *sql.DB, CustomUserChan chan<- CustomUser, wg *sync.WaitGroup) {
@@ -225,7 +257,7 @@ func fetchCustomUserData(db *sql.DB, CustomUserChan chan<- CustomUser, wg *sync.
 
 	rows, err := db.Query(`SELECT user_id,phone_number,first_name,last_name,can_apply_for_loan,blocked,address,date_of_birth,
 	gender,interested,fathers_name,blocked_reason,not_interested_reason,max_credit_limit,blocked_date_time,
-	can_apply_date_time,auto,phone_number_verified FROM user_manage_usertype`)
+	can_apply_date_time,auto,phone_number_verified FROM user_manage_customusermodel ORDER BY user_id LIMIT 5000`)
 	if err != nil {
 		log.Println(err)
 		return
@@ -255,7 +287,7 @@ func fetchCustomUserData(db *sql.DB, CustomUserChan chan<- CustomUser, wg *sync.
 func fetchDeviceInfoData(db *sql.DB, DeviceInfoChan chan<- DeviceInfo, wg *sync.WaitGroup) {
 	defer wg.Done()
 
-	rows, err := db.Query("SELECT id,device_info,user_id FROM user_manage_deviceinfomodel")
+	rows, err := db.Query("SELECT device_info,user_id FROM user_manage_deviceinfomodel ORDER BY user_id LIMIT 5000")
 	if err != nil {
 		log.Println(err)
 		return
@@ -264,7 +296,7 @@ func fetchDeviceInfoData(db *sql.DB, DeviceInfoChan chan<- DeviceInfo, wg *sync.
 
 	for rows.Next() {
 		var deviceinfo DeviceInfo
-		err := rows.Scan(&deviceinfo.id, &deviceinfo.device_info, &deviceinfo.user_id)
+		err := rows.Scan(&deviceinfo.device_info, &deviceinfo.user_id)
 		if err != nil {
 			log.Println(err)
 			continue
@@ -276,11 +308,36 @@ func fetchDeviceInfoData(db *sql.DB, DeviceInfoChan chan<- DeviceInfo, wg *sync.
 	close(DeviceInfoChan)
 }
 
+// Fetch device info data from the database and send it to the DeviceInfoChan channel
+func fetchLoanUserData(db *sql.DB, LoanUserChan chan<- LoanUser, wg *sync.WaitGroup) {
+	defer wg.Done()
+
+	rows, err := db.Query("SELECT id, last_login, email, created_at FROM user_manage_loanuser ORDER BY id LIMIT 5000")
+	if err != nil {
+		log.Println(err)
+		return
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var loanuser LoanUser
+		err := rows.Scan(&loanuser.id, &loanuser.last_login, &loanuser.email, &loanuser.created_at)
+		if err != nil {
+			log.Println(err)
+			continue
+		}
+
+		LoanUserChan <- loanuser
+	}
+
+	close(LoanUserChan)
+}
+
 // Fetch user type data from the database and send it to the UserTypeChan channel
 func fetchUserTypeData(db *sql.DB, UserTypeChan chan<- UserType, wg *sync.WaitGroup) {
 	defer wg.Done()
 
-	rows, err := db.Query("SELECT * FROM user_manage_usertype")
+	rows, err := db.Query("SELECT * FROM user_manage_usertype ORDER BY id LIMIT 5000")
 	if err != nil {
 		log.Println(err)
 		return
@@ -306,7 +363,7 @@ func fetchUserBankData(db *sql.DB, UserBankChan chan<- UserBank, wg *sync.WaitGr
 	defer wg.Done()
 
 	rows, err := db.Query(`SELECT user_id,bank_name,account_number,ifsc_code,verified,bene_name_from_bank
-	FROM user_manage_userbankdetailsmodel`)
+	FROM user_manage_userbankdetailsmodel ORDER BY user_id LIMIT 5000`)
 	if err != nil {
 		log.Println(err)
 		return
@@ -336,7 +393,7 @@ func fetchUserDocsData(db *sql.DB, UserDocsChan chan<- UserDocs, wg *sync.WaitGr
 	,office_id_verified,salary_slip_verified,office_email_id,office_email_id_verified,office_extension,
 	office_extension_verified,reference_1_name,reference_1_phone,reference_2_name,reference_2_phone,
 	references_verified,social_score_verified,bank_statement_verified,bank_statement_password,
-	cibil_score,cibil_score_verified,digital_ekyc FROM user_manage_userdocumentsmodel`)
+	cibil_score,cibil_score_verified,digital_ekyc FROM user_manage_userdocumentsmodel ORDER BY user_id LIMIT 5000`)
 	if err != nil {
 		log.Println(err)
 		return
@@ -362,13 +419,14 @@ func fetchUserDocsData(db *sql.DB, UserDocsChan chan<- UserDocs, wg *sync.WaitGr
 	close(UserDocsChan)
 }
 
-func ProcessRecords(CustomUserChan <-chan CustomUser, DeviceInfoChan <-chan DeviceInfo, UserTypeChan <-chan UserType, UserBankChan <-chan UserBank, UserDocsChan <-chan UserDocs, processedRecordsChan chan<- ProcessedRecords, wg *sync.WaitGroup) {
+func ProcessRecords(CustomUserChan <-chan CustomUser, DeviceInfoChan <-chan DeviceInfo, UserTypeChan <-chan UserType, UserBankChan <-chan UserBank, UserDocsChan <-chan UserDocs, LoanUserChan <-chan LoanUser, processedRecordsChan chan<- ProcessedRecords, wg *sync.WaitGroup) {
 	defer wg.Done()
 
 	customUserMap := make(map[int]CustomUser)
 	userTypeMap := make(map[int]UserType)
 	userBankMap := make(map[int]UserBank)
 	userDocsMap := make(map[int]UserDocs)
+	deviceInfoMap := make(map[int]DeviceInfo)
 
 	for customUserData := range CustomUserChan {
 		customUserMap[customUserData.user_id] = customUserData
@@ -386,17 +444,26 @@ func ProcessRecords(CustomUserChan <-chan CustomUser, DeviceInfoChan <-chan Devi
 		userDocsMap[userDocsData.user_id] = userDocsData
 	}
 
-	for deviceInfo := range DeviceInfoChan {
-		customUserData, customUserDataExists := customUserMap[deviceInfo.user_id]
-		userTypeData, userTypeDataExists := userTypeMap[deviceInfo.id]
-		userBankData, userBankDataExists := userBankMap[deviceInfo.user_id]
-		userDocsData, userDocsDataExists := userDocsMap[deviceInfo.user_id]
+	for deviceInfoData := range DeviceInfoChan {
+		deviceInfoMap[deviceInfoData.user_id] = deviceInfoData
+	}
 
-		if !customUserDataExists || !userTypeDataExists || !userBankDataExists || !userDocsDataExists {
+	for loanUser := range LoanUserChan {
+		customUserData, customUserDataExists := customUserMap[loanUser.id]
+		userTypeData, userTypeDataExists := userTypeMap[loanUser.id]
+		userBankData, userBankDataExists := userBankMap[loanUser.id]
+		userDocsData, userDocsDataExists := userDocsMap[loanUser.id]
+		deviceInfoData, deviceInfoDataExists := deviceInfoMap[loanUser.id]
+
+		if !customUserDataExists || !userTypeDataExists || !userBankDataExists || !userDocsDataExists || !deviceInfoDataExists {
 			continue
 		}
+		fmt.Println(5)
 
 		processedRecords := ProcessedRecords{
+			created_at:                loanUser.created_at,
+			last_login:                loanUser.last_login,
+			email:                     loanUser.email,
 			address:                   customUserData.address,
 			auto:                      customUserData.auto,
 			blocked:                   customUserData.blocked,
@@ -414,7 +481,7 @@ func ProcessRecords(CustomUserChan <-chan CustomUser, DeviceInfoChan <-chan Devi
 			phone_number:              customUserData.phone_number,
 			phone_number_verified:     customUserData.phone_number_verified,
 			max_credit_limit:          customUserData.max_credit_limit,
-			device_info:               deviceInfo.device_info,
+			device_info:               deviceInfoData.device_info,
 			name:                      userTypeData.name,
 			account_number:            userBankData.account_number,
 			bank_name:                 userBankData.bank_name,
@@ -442,10 +509,8 @@ func ProcessRecords(CustomUserChan <-chan CustomUser, DeviceInfoChan <-chan Devi
 			salary_slip_verified:      userDocsData.salary_slip_verified,
 			social_score_verified:     userDocsData.social_score_verified,
 		}
-
 		processedRecordsChan <- processedRecords
 	}
-
 	close(processedRecordsChan)
 
 }
